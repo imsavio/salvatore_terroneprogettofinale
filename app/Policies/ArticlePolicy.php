@@ -4,65 +4,51 @@ namespace App\Policies;
 
 use App\Models\Article;
 use App\Models\User;
-use Illuminate\Auth\Access\HandlesAuthorization;
 
 class ArticlePolicy
 {
-    use HandlesAuthorization;
-
-    /**
-     * Determine whether the user can view any models.
-     */
-    public function viewAny(User $user): bool
+    public function viewAny(?User $user): bool
     {
         return true;
     }
 
-    /**
-     * Determine whether the user can view the model.
-     */
-    public function view(User $user, Article $article): bool
+    public function view(?User $user, Article $article): bool
     {
-        return true;
+        // Gli admin possono vedere qualsiasi articolo
+        if ($user?->isAdmin()) {
+            return true;
+        }
+
+        return $article->isPublished() || ($user?->id === $article->user_id);
     }
 
-    /**
-     * Determine whether the user can create models.
-     */
     public function create(User $user): bool
     {
         return true;
     }
 
-    /**
-     * Determine whether the user can update the model.
-     */
     public function update(User $user, Article $article): bool
     {
+        // Gli admin possono modificare qualsiasi articolo
+        if ($user->isAdmin()) {
+            return true;
+        }
+
         return $user->id === $article->user_id;
     }
 
-    /**
-     * Determine whether the user can delete the model.
-     */
     public function delete(User $user, Article $article): bool
     {
-        return $user->id === $article->user_id;
+        return $this->update($user, $article);
     }
 
-    /**
-     * Determine whether the user can restore the model.
-     */
     public function restore(User $user, Article $article): bool
     {
-        return $user->id === $article->user_id;
+        return $this->update($user, $article);
     }
 
-    /**
-     * Determine whether the user can permanently delete the model.
-     */
     public function forceDelete(User $user, Article $article): bool
     {
-        return $user->id === $article->user_id;
+        return $this->update($user, $article);
     }
 }

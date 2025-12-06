@@ -1,0 +1,121 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+$primary: #0a84ff;
+$secondary: #0b0d17;
+$success: #0ce7a2;
+$light: #f5f7fb;
+$body-bg: #ffffff;
+$body-color: #141a28;
+$font-family-sans-serif: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+$headings-font-weight: 600;
+
+@import "bootstrap/scss/bootstrap";
+
+:root {
+    scroll-behavior: smooth;
+}
+
+body {
+    background-color: $body-bg;
+    color: $body-color;
+}
+
+a {
+    text-decoration: none;
+}
+
+a:hover,
+a:focus {
+    text-decoration: underline;
+}
+
+.navbar {
+    backdrop-filter: blur(12px);
+    background-color: rgba(11, 13, 23, 0.6) !important;
+}
+
+.hero {
+    min-height: 70vh;
+    padding: 6rem 0 4rem;
+    display: flex;
+    align-items: center;
+    background: radial-gradient(83.74% 83.74% at 50% 0%, rgba(160, 210, 255, 0.12) 0%, rgba(10, 132, 255, 0.02) 70%, transparent 100%),
+        linear-gradient(135deg, rgba(11, 13, 23, 0.95) 0%, rgba(11, 13, 23, 0.85) 100%);
+    color: #ffffff;
+}
+
+.hero-title {
+    font-size: clamp(2.5rem, 4vw, 3.5rem);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.hero-subtitle {
+    font-size: clamp(1.125rem, 2vw, 1.5rem);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.section-heading {
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+
+.section-subtitle {
+    color: #4a5568;
+}
+
+.card-modern {
+    border: none;
+    border-radius: 1.25rem;
+    box-shadow: 0 30px 60px -40px rgba(10, 30, 80, 0.45);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card-modern:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 30px 70px -35px rgba(10, 30, 80, 0.55);
+}
+
+.btn-cta {
+    padding: 0.75rem 1.75rem;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.badge-soft {
+    background-color: rgba(10, 132, 255, 0.12);
+    color: #0a84ff;
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.footer {
+    background-color: #0b0d17;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.footer a {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.form-control,
+.form-select {
+    border-radius: 0.75rem;
+    padding: 0.75rem 1rem;
+}
+
+.form-control:focus,
+.form-select:focus {
+    box-shadow: 0 0 0 0.25rem rgba(10, 132, 255, 0.18);
+    border-color: #0a84ff;
+}
+
+.alert-modern {
+    border-radius: 1rem;
+    border: none;
+    box-shadow: 0 30px 60px -40px rgba(10, 132, 255, 0.35);
+}
+

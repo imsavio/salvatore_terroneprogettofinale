@@ -2,119 +2,90 @@
 
 namespace App\Models;
 
+use App\Models\Tag;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Str;
+use Illuminate\Support\Stringable;
 
 class Article extends Model
 {
     use HasFactory;
 
     protected $fillable = [
-        'title',
-        'content',
-        'excerpt',
-        'featured_image',
-        'published_at',
         'user_id',
+        'title',
         'slug',
+        'excerpt',
+        'body',
+        'cover_image',
+        'published_at',
+        'is_anonymous',
     ];
 
     protected $casts = [
         'published_at' => 'datetime',
+        'is_anonymous' => 'boolean',
     ];
 
-    /**
-     * Get the user that owns the article.
-     */
-    public function user(): BelongsTo
+    protected $with = ['author', 'tags'];
+
+    public function author(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class, 'user_id');
     }
 
-    /**
-     * Get the tags for the article.
-     */
     public function tags(): BelongsToMany
     {
-        return $this->belongsToMany(Tag::class);
+        return $this->belongsToMany(Tag::class)->withTimestamps();
     }
 
-    /**
-     * Boot the model.
-     */
-    protected static function boot()
+    public function scopePublished(Builder $query): Builder
     {
-        parent::boot();
-
-        static::creating(function ($article) {
-            if (empty($article->slug)) {
-                $article->slug = \App\Helpers\SlugHelper::generateUniqueArticleSlug($article->title);
+        return $query->whereNotNull('published_at')->where('published_at', '<=', now());
             }
-        });
 
-        static::updating(function ($article) {
-            if ($article->isDirty('title')) {
-                $article->slug = \App\Helpers\SlugHelper::generateUniqueArticleSlug($article->title, $article->id);
-            }
-        });
-    }
-
-    /**
-     * Scope a query to only include published articles.
-     */
-    public function scopePublished($query)
+    public function scopeLatestFirst(Builder $query): Builder
     {
-        return $query->whereNotNull('published_at')
-                    ->where('published_at', '<=', now());
+        return $query->orderByDesc('published_at')->orderByDesc('created_at');
     }
 
-    /**
-     * Scope a query to only include draft articles.
-     */
-    public function scopeDraft($query)
+    public function isPublished(): bool
     {
-        return $query->whereNull('published_at');
+        return ! is_null($this->published_at) && $this->published_at->isPast();
     }
 
-    /**
-     * Get the route key for the model.
-     */
-    public function getRouteKeyName()
+    public function syncTags(array $tags): void
+    {
+        $tagIds = collect($tags)
+            ->filter()
+            ->map(fn (string $tag) => Str::of($tag)->trim()->lower())
+            ->filter()
+            ->unique()
+            ->map(function (Stringable $tag) {
+                $slug = (string) $tag->slug();
+                $name = Str::of($slug)->replace('-', ' ')->title();
+
+                return Tag::firstOrCreate(
+                    ['slug' => $slug],
+                    ['name' => $name]
+                )->id;
+            })
+            ->all();
+
+        $this->tags()->sync($tagIds);
+    }
+
+    public function getRouteKeyName(): string
     {
         return 'slug';
     }
 
-    /**
-     * Get the excerpt attribute.
-     */
-    public function getExcerptAttribute($value)
+    public function getAuthorNameAttribute(): string
     {
-        if (empty($value)) {
-            return Str::limit(strip_tags($this->content), 150);
-        }
-        return $value;
-    }
-
-    /**
-     * Set the slug attribute.
-     */
-    public function setSlugAttribute($value)
-    {
-        if (empty($value)) {
-            $this->attributes['slug'] = $this->generateUniqueSlug($this->title);
-        } else {
-            $this->attributes['slug'] = $value;
-        }
-    }
-
-    /**
-     * Generate a unique slug.
-     */
-    private function generateUniqueSlug($title)
-    {
-        return \App\Helpers\SlugHelper::generateUniqueArticleSlug($title, $this->id);
+        return $this->is_anonymous ? 'Anonimo' : $this->author->name;
     }
 }

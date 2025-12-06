@@ -2,252 +2,186 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\ArticleRequest;
 use App\Models\Article;
-use App\Models\Tag;
-use App\Http\Requests\StoreArticleRequest;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Gate;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\View\View;
 
 class ArticleController extends Controller
 {
     public function __construct()
     {
         $this->middleware('auth')->except(['index', 'show']);
+        $this->authorizeResource(Article::class, 'article');
     }
 
-    /**
-     * Display a listing of the resource.
-     */
-    public function index(Request $request)
+    public function index(): View
     {
-        $query = Article::with(['user:id,name,username', 'tags:id,name,slug,color'])->published();
+        $articlesQuery = Article::query()->with(['author', 'tags']);
 
-        // Search functionality with full-text search
-        if ($request->filled('search')) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('excerpt', 'like', "%{$search}%")
-                  ->orWhere('content', 'like', "%{$search}%");
-            });
+        if (auth()->check() && auth()->user()->isAdmin()) {
+            // Gli admin vedono tutti gli articoli
+            $articles = $articlesQuery
+                ->latestFirst()
+                ->paginate(9)
+                ->withQueryString();
+        } else {
+            $articles = $articlesQuery
+                ->when(auth()->check(), function ($query) {
+                    $query->where(function ($subQuery) {
+                        $subQuery->published()
+                            ->orWhere('user_id', auth()->id());
+                    });
+                }, fn ($query) => $query->published())
+                ->latestFirst()
+                ->paginate(9)
+                ->withQueryString();
         }
 
-        // Filter by tag with optimized query
-        if ($request->filled('tag')) {
-            $query->whereHas('tags', function($q) use ($request) {
-                $q->where('slug', $request->tag);
-            });
-        }
-
-        // Filter by author with optimized query
-        if ($request->filled('author')) {
-            $query->where('user_id', $request->author);
-        }
-
-        // Filter by date range with index optimization
-        if ($request->filled('date_from')) {
-            $query->whereDate('published_at', '>=', $request->date_from);
-        }
-        if ($request->filled('date_to')) {
-            $query->whereDate('published_at', '<=', $request->date_to);
-        }
-
-        // Sorting with proper indexing
-        $sort = $request->get('sort', 'latest');
-        switch ($sort) {
-            case 'oldest':
-                $query->oldest('published_at');
-                break;
-            case 'title':
-                $query->orderBy('title');
-                break;
-            case 'author':
-                $query->join('users', 'articles.user_id', '=', 'users.id')
-                      ->orderBy('users.name')
-                      ->select('articles.*');
-                break;
-            default:
-                $query->latest('published_at');
-        }
-
-        $articles = $query->paginate(12)->withQueryString();
-
-        // Get filter options with caching
-        $tags = cache()->remember('tags_with_count', 3600, function () {
-            return Tag::withCount('articles')->orderBy('articles_count', 'desc')->get();
-        });
-        
-        $authors = cache()->remember('authors_with_count', 3600, function () {
-            return \App\Models\User::withCount('articles')->having('articles_count', '>', 0)->get();
-        });
-
-        return view('articles.index', compact('articles', 'tags', 'authors'));
+        return view('articles.index', compact('articles'));
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
+    public function create(): View
     {
-        $tags = Tag::all();
-        return view('articles.create', compact('tags'));
-    }
+        $article = new Article();
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(StoreArticleRequest $request)
-    {
-        // Handle published_at based on action
-        $publishedAt = $request->published_at;
-        if ($request->input('action') === 'draft') {
-            $publishedAt = null;
-        } elseif (empty($publishedAt)) {
-            $publishedAt = now();
-        }
-
-        $article = Article::create([
-            'title' => $request->title,
-            'content' => $request->content,
-            'excerpt' => $request->excerpt,
-            'featured_image' => $request->featured_image,
-            'published_at' => $publishedAt,
-            'user_id' => Auth::id(),
+        return view('articles.create', [
+            'article' => $article,
+            'tagList' => '',
         ]);
+    }
 
-        // Handle tags - create new ones if they don't exist
-        if ($request->has('tags')) {
-            $tagIds = [];
-            foreach ($request->tags as $tagInput) {
-                if (is_numeric($tagInput)) {
-                    // Existing tag ID
-                    $tagIds[] = $tagInput;
-                } else {
-                    // New tag name - create it
-                    $tag = \App\Models\Tag::firstOrCreate(
-                        ['name' => $tagInput],
-                        [
-                            'slug' => \Str::slug($tagInput),
-                            'color' => $this->generateRandomColor()
-                        ]
-                    );
-                    $tagIds[] = $tag->id;
+    public function store(ArticleRequest $request): RedirectResponse
+    {
+        try {
+            $data = $request->validated();
+
+            $article = $request->user()->articles()->create([
+                'title' => $data['title'],
+                'slug' => $this->uniqueSlug($data['title']),
+                'excerpt' => $data['excerpt'],
+                'body' => $data['body'],
+                'published_at' => $request->resolvePublishedAt(),
+                'is_anonymous' => $request->boolean('is_anonymous', false),
+            ]);
+
+            if ($request->hasFile('cover_image')) {
+                try {
+                    $path = $request->file('cover_image')->store('articles', 'public');
+                    $article->update([
+                        'cover_image' => $path,
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::error('Errore upload immagine: ' . $e->getMessage());
+                    // Continua senza l'immagine se c'è un errore
                 }
             }
-            $article->tags()->sync($tagIds);
+
+            $article->syncTags($request->tags());
+
+            return redirect()
+                ->route('articles.show', $article)
+                ->with('status', 'Storia creata con successo.');
+        } catch (\Exception $e) {
+            \Log::error('Errore nella creazione articolo: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->except(['password', '_token']),
+            ]);
+
+            return back()
+                ->withInput()
+                ->withErrors(['error' => 'Si è verificato un errore durante la creazione della storia. Riprova più tardi.']);
         }
-
-        $message = $request->input('action') === 'draft' 
-            ? 'Articolo salvato come bozza con successo!' 
-            : 'Articolo pubblicato con successo!';
-
-        return redirect()->route('articles.show', $article)
-            ->with('success', $message);
     }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(Article $article)
+    public function show(Article $article): View
     {
-        $article->load(['user', 'tags']);
+        $article->loadMissing('author', 'tags');
+
+        abort_unless(
+            (auth()->check() && auth()->user()->isAdmin())
+            || $article->isPublished()
+            || auth()->id() === $article->user_id,
+            404
+        );
         
         return view('articles.show', compact('article'));
     }
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Article $article)
+    public function edit(Article $article): View
     {
-        Gate::authorize('update', $article);
-        
-        $tags = Tag::all();
-        $selectedTags = $article->tags->pluck('id')->toArray();
-        
-        return view('articles.edit', compact('article', 'tags', 'selectedTags'));
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(StoreArticleRequest $request, Article $article)
-    {
-        Gate::authorize('update', $article);
-
-        // Handle published_at based on action
-        $publishedAt = $request->published_at;
-        if ($request->input('action') === 'draft') {
-            $publishedAt = null;
-        } elseif (empty($publishedAt) && $request->input('action') === 'publish') {
-            $publishedAt = now();
-        }
-
-        $article->update([
-            'title' => $request->title,
-            'content' => $request->content,
-            'excerpt' => $request->excerpt,
-            'featured_image' => $request->featured_image,
-            'published_at' => $publishedAt,
+        return view('articles.edit', [
+            'article' => $article,
+            'tagList' => $article->tags->pluck('name')->implode(', '),
         ]);
-
-        // Handle tags - create new ones if they don't exist
-        if ($request->has('tags')) {
-            $tagIds = [];
-            foreach ($request->tags as $tagInput) {
-                if (is_numeric($tagInput)) {
-                    // Existing tag ID
-                    $tagIds[] = $tagInput;
-                } else {
-                    // New tag name - create it
-                    $tag = \App\Models\Tag::firstOrCreate(
-                        ['name' => $tagInput],
-                        [
-                            'slug' => \Str::slug($tagInput),
-                            'color' => $this->generateRandomColor()
-                        ]
-                    );
-                    $tagIds[] = $tag->id;
-                }
-            }
-            $article->tags()->sync($tagIds);
-        } else {
-            $article->tags()->detach();
-        }
-
-        $message = $request->input('action') === 'draft' 
-            ? 'Articolo salvato come bozza con successo!' 
-            : 'Articolo aggiornato con successo!';
-
-        return redirect()->route('articles.show', $article)
-            ->with('success', $message);
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Article $article)
+    public function update(ArticleRequest $request, Article $article): RedirectResponse
     {
-        Gate::authorize('delete', $article);
+        $data = $request->validated();
+
+        $attributes = [
+            'title' => $data['title'],
+            'excerpt' => $data['excerpt'],
+            'body' => $data['body'],
+            'published_at' => $request->resolvePublishedAt($article->published_at),
+            'is_anonymous' => $request->boolean('is_anonymous', false),
+        ];
+
+        if ($article->title !== $data['title']) {
+            $attributes['slug'] = $this->uniqueSlug($data['title'], $article);
+        }
+
+        if ($request->hasFile('cover_image')) {
+            try {
+                if ($article->cover_image) {
+                    Storage::disk('public')->delete($article->cover_image);
+                }
+
+                $attributes['cover_image'] = $request->file('cover_image')->store('articles', 'public');
+            } catch (\Exception $e) {
+                \Log::error('Errore upload immagine durante aggiornamento: ' . $e->getMessage());
+                // Non aggiornare l'immagine se c'è un errore
+            }
+        }
+
+        $article->update($attributes);
+        $article->syncTags($request->tags());
+
+        return redirect()
+            ->route('articles.show', $article)
+            ->with('status', 'Articolo aggiornato con successo.');
+    }
+
+    public function destroy(Article $article): RedirectResponse
+    {
+        if ($article->cover_image) {
+            Storage::disk('public')->delete($article->cover_image);
+        }
         
         $article->delete();
         
-        return redirect()->route('home')
-            ->with('success', 'Articolo eliminato con successo!');
+        return redirect()
+            ->route('articles.index')
+            ->with('status', 'Articolo eliminato.');
     }
 
-    /**
-     * Generate a random color for tags.
-     */
-    private function generateRandomColor(): string
+    protected function uniqueSlug(string $title, ?Article $ignore = null): string
     {
-        $colors = [
-            '#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6',
-            '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1',
-            '#14B8A6', '#F43F5E', '#8B5A2B', '#059669', '#DC2626'
-        ];
+        $baseSlug = Str::slug($title) ?: Str::random(8);
+        $slug = $baseSlug;
+        $counter = 1;
 
-        return $colors[array_rand($colors)];
+        while (
+            Article::where('slug', $slug)
+                ->when($ignore, fn ($query) => $query->where('id', '!=', $ignore->id))
+                ->exists()
+        ) {
+            $slug = $baseSlug . '-' . $counter++;
+        }
+
+        return $slug;
     }
 }

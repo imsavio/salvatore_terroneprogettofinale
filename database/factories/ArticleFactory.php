@@ -16,17 +16,16 @@ class ArticleFactory extends Factory
      */
     public function definition(): array
     {
-        $title = $this->faker->sentence(rand(3, 8));
-        $content = $this->faker->paragraphs(rand(5, 15), true);
+        $title = $this->faker->sentence(6);
         
         return [
-            'title' => $title,
-            'content' => $content,
-            'excerpt' => $this->faker->paragraph(rand(2, 4)),
-            'featured_image' => $this->faker->optional(0.7)->imageUrl(800, 600, 'technology'),
-            'published_at' => $this->faker->optional(0.8)->dateTimeBetween('-1 year', 'now'),
             'user_id' => \App\Models\User::factory(),
-            'slug' => \Illuminate\Support\Str::slug($title),
+            'title' => $title,
+            'slug' => \Illuminate\Support\Str::slug($title) . '-' . \Illuminate\Support\Str::random(6),
+            'excerpt' => $this->faker->paragraph(2),
+            'body' => collect(range(1, 5))->map(fn () => $this->faker->paragraph(5))->implode("\n\n"),
+            'cover_image' => null,
+            'published_at' => $this->faker->optional(0.7)->dateTimeBetween('-1 month', '+1 week'),
         ];
     }
 

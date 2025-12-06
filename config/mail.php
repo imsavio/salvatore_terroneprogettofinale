@@ -98,8 +98,8 @@ return [
     */
 
     'from' => [
-        'address' => env('MAIL_FROM_ADDRESS', 'noreply@blog-project.com'),
-        'name' => env('MAIL_FROM_NAME', 'Laravel Blog'),
+        'address' => env('MAIL_FROM_ADDRESS', 'agenziaaulab@mail.com'),
+        'name' => env('MAIL_FROM_NAME', 'VITAH'),
     ],
 
     'admin_email' => env('MAIL_ADMIN_EMAIL', 'admin@blog-project.com'),
